@@ -12,18 +12,27 @@ import {
   Terminal,
   Code2,
   Zap,
-  Check
+  Check,
+  Globe
 } from 'lucide-react';
 import { MonacoEditorView } from './MonacoEditorView';
 import { ExplainPanel } from './ExplainPanel';
 import { DiagnosticsList } from './DiagnosticsList';
 import { sound } from '../lib/audio';
-import { Challenge, CodeDiagnostic, PersonaMode, AiEngine, TestCase } from '../types';
+import { runClientHeuristicLint } from '../lib/linter';
+import { Challenge, CodeDiagnostic, PersonaMode, AiEngine, TestCase, SupportedLanguage } from '../types';
 
 interface SoloDojoProps {
   persona: PersonaMode;
   aiEngine: AiEngine;
 }
+
+const LANGUAGES: Array<{ id: SupportedLanguage; label: string; ext: string }> = [
+  { id: 'javascript', label: 'JavaScript', ext: 'JS' },
+  { id: 'python', label: 'Python', ext: 'PY' },
+  { id: 'cpp', label: 'C++', ext: 'CPP' },
+  { id: 'java', label: 'Java', ext: 'JAVA' }
+];
 
 export const SoloDojo: React.FC<SoloDojoProps> = ({
   persona,
@@ -31,6 +40,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
 }) => {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [selectedChallenge, setSelectedChallenge] = useState<Challenge | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('javascript');
   const [code, setCode] = useState('');
   const [diagnostics, setDiagnostics] = useState<CodeDiagnostic[]>([]);
   const [testResults, setTestResults] = useState<TestCase[]>([]);
@@ -39,8 +49,10 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
   const [selectedLine, setSelectedLine] = useState<number | undefined>();
   const [selectedDiag, setSelectedDiag] = useState<CodeDiagnostic | undefined>();
   const [showHints, setShowHints] = useState(false);
-  const [activeTab, setActiveTab] = useState<'diagnostics' | 'tests' | 'hints'>('diagnostics');
+  const [activeTab, setActiveTab] = useState<'diagnostics' | 'tests'>('diagnostics');
+  const [mobileView, setMobileView] = useState<'editor' | 'problem' | 'results'>('editor');
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lintAbortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch challenges
   useEffect(() => {
@@ -49,18 +61,38 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
       .then(data => {
         setChallenges(data);
         if (data.length > 0) {
-          loadChallenge(data[0]);
+          loadChallenge(data[0], selectedLanguage);
         }
       })
       .catch(console.error);
   }, []);
 
-  const loadChallenge = (ch: Challenge) => {
+  const getCodeForLanguage = (ch: Challenge, lang: SupportedLanguage) => {
+    if (ch.starterCodes && ch.starterCodes[lang]) {
+      return ch.starterCodes[lang];
+    }
+    return ch.brokenCode || '';
+  };
+
+  const loadChallenge = (ch: Challenge, lang: SupportedLanguage = selectedLanguage, switchToEditor: boolean = true) => {
     setSelectedChallenge(ch);
-    setCode(ch.brokenCode);
+    const starterCode = getCodeForLanguage(ch, lang);
+    setCode(starterCode);
     setTestResults(ch.testCases.map(t => ({ ...t, passed: undefined })));
     setShowHints(false);
-    triggerDebouncedLint(ch.brokenCode, ch.language);
+    triggerDebouncedLint(starterCode, lang);
+    if (switchToEditor) {
+      setMobileView('editor');
+    }
+  };
+
+  const handleLanguageChange = (lang: SupportedLanguage) => {
+    setSelectedLanguage(lang);
+    if (selectedChallenge) {
+      const newCode = getCodeForLanguage(selectedChallenge, lang);
+      setCode(newCode);
+      triggerDebouncedLint(newCode, lang);
+    }
   };
 
   // Debounced watcher for code modifications
@@ -73,11 +105,25 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      triggerDebouncedLint(newCode, selectedChallenge.language);
+      triggerDebouncedLint(newCode, selectedLanguage);
     }, 1500);
   };
 
   const triggerDebouncedLint = async (codeToLint: string, language: string) => {
+    // Abort previous pending lint fetch if still running
+    if (lintAbortControllerRef.current) {
+      lintAbortControllerRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    lintAbortControllerRef.current = abortController;
+
+    // Run client heuristic check first for instant feedback
+    const clientHeuristics = runClientHeuristicLint(codeToLint, language, persona);
+    if (clientHeuristics.length > 0) {
+      setDiagnostics(clientHeuristics);
+    }
+
     try {
       const res = await fetch('/api/ai/lint', {
         method: 'POST',
@@ -87,14 +133,25 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
           language,
           persona,
           engine: aiEngine
-        })
+        }),
+        signal: abortController.signal
       });
+
+      if (!res.ok) {
+        throw new Error(`Lint HTTP ${res.status}`);
+      }
+
       const data = await res.json();
-      if (data.diagnostics) {
+      if (data.diagnostics && Array.isArray(data.diagnostics)) {
         setDiagnostics(data.diagnostics);
       }
-    } catch (err) {
-      console.error('Dojo lint error:', err);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
+      // If backend API request fails or is unavailable, use client heuristics seamlessly
+      const fallbackDiags = runClientHeuristicLint(codeToLint, language, persona);
+      setDiagnostics(fallbackDiags);
     }
   };
 
@@ -111,7 +168,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
         body: JSON.stringify({
           code,
           challengeId: selectedChallenge.id,
-          language: selectedChallenge.language,
+          language: selectedLanguage,
           testCases: selectedChallenge.testCases
         })
       });
@@ -133,8 +190,9 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
 
   const handleResetCode = () => {
     if (selectedChallenge) {
-      setCode(selectedChallenge.brokenCode);
-      triggerDebouncedLint(selectedChallenge.brokenCode, selectedChallenge.language);
+      const original = getCodeForLanguage(selectedChallenge, selectedLanguage);
+      setCode(original);
+      triggerDebouncedLint(original, selectedLanguage);
     }
   };
 
@@ -142,28 +200,82 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
   const totalCount = testResults.length;
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-62px)] bg-zinc-950 overflow-hidden">
-      {/* Left Column: Challenge Selector & Problem Spec */}
-      <div className="w-full lg:w-80 border-r border-zinc-800 bg-zinc-950 flex flex-col">
-        <div className="p-3.5 border-b border-zinc-800 bg-zinc-900/80 flex items-center justify-between">
+    <div className="flex-1 flex flex-col lg:flex-row min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
+      {/* Mobile Mode Switcher Bar (Only visible on < lg screens) */}
+      <div className="lg:hidden flex items-center justify-between px-2.5 py-1.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 text-xs">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMobileView('editor')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileView === 'editor'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Code
+          </button>
+          <button
+            onClick={() => setMobileView('problem')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileView === 'problem'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Problem ({challenges.length})
+          </button>
+          <button
+            onClick={() => setMobileView('results')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileView === 'results'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Tests & AI ({diagnostics.length})
+          </button>
+        </div>
+
+        {/* Quick Problem Select Dropdown for Mobile */}
+        <select
+          value={selectedChallenge?.id || ''}
+          onChange={(e) => {
+            const ch = challenges.find(c => c.id === e.target.value);
+            if (ch) loadChallenge(ch, selectedLanguage);
+          }}
+          className="bg-zinc-950 text-zinc-300 text-[11px] border border-zinc-800 rounded-lg px-2 py-1 max-w-[140px] truncate"
+        >
+          {challenges.map(c => (
+            <option key={c.id} value={c.id}>
+              {c.title}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Left Column: Challenge Selector & Problem Spec (Desktop always, Mobile conditional) */}
+      <div className={`w-full lg:w-80 border-r border-zinc-800 bg-zinc-950 flex-col h-[480px] sm:h-[540px] md:h-[580px] lg:h-full ${mobileView === 'problem' ? 'flex' : 'hidden lg:flex'}`}>
+        <div className="h-11 px-3 border-b border-zinc-800 bg-zinc-900/90 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-indigo-400" />
             <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-              Solo Dojo Challenges
+              DSA Problem Library
             </h3>
           </div>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
-            {challenges.length} Available
+            {challenges.length} Problems
           </span>
         </div>
 
         {/* Challenge list */}
-        <div className="p-2 space-y-1 overflow-y-auto max-h-56 lg:max-h-none flex-1 border-b lg:border-b-0 border-zinc-800">
+        <div className="p-2 space-y-1 overflow-y-auto flex-1 border-b lg:border-b-0 border-zinc-800 min-h-0">
           {challenges.map((c) => (
             <button
               key={c.id}
-              onClick={() => loadChallenge(c)}
-              className={`w-full text-left p-2.5 rounded-xl border transition-all ${
+              onClick={() => {
+                loadChallenge(c, selectedLanguage, true);
+              }}
+              className={`w-full text-left p-2.5 rounded-xl border transition-all cursor-pointer ${
                 selectedChallenge?.id === c.id
                   ? 'bg-zinc-900 border-indigo-500/80 text-white shadow-md'
                   : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
@@ -182,7 +294,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
                 </span>
               </div>
               <span className="text-[10px] text-zinc-500 font-mono">
-                {c.category} • {c.language}
+                {c.category}
               </span>
             </button>
           ))}
@@ -190,8 +302,17 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
 
         {/* Challenge Spec & Hints */}
         {selectedChallenge && (
-          <div className="p-4 bg-zinc-900/40 border-t border-zinc-800 overflow-y-auto max-h-60 text-xs">
-            <h4 className="font-bold text-zinc-200 mb-1.5">Problem Objective</h4>
+          <div className="p-3.5 bg-zinc-900/40 border-t border-zinc-800 overflow-y-auto max-h-56 lg:max-h-64 text-xs flex-shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <h4 className="font-bold text-zinc-200">Problem Objective</h4>
+              <button
+                onClick={() => setMobileView('editor')}
+                className="lg:hidden px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[11px] font-semibold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+              >
+                <Code2 className="w-3 h-3" />
+                <span>Open Editor</span>
+              </button>
+            </div>
             <p className="text-zinc-400 leading-relaxed mb-3">
               {selectedChallenge.description}
             </p>
@@ -218,33 +339,47 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
         )}
       </div>
 
-      {/* Center: Monaco Editor & Controls */}
-      <div className="flex-1 flex flex-col bg-zinc-950 min-w-0">
+      {/* Center & Right: Monaco Editor & Controls & Diagnostics */}
+      <div className={`flex-1 flex flex-col bg-zinc-950 min-w-0 min-h-0 lg:h-full ${mobileView === 'problem' ? 'hidden lg:flex' : 'flex'}`}>
         {/* Editor action header */}
-        <div className="px-4 py-2.5 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-white">
+        <div className="h-11 px-3 sm:px-4 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between gap-2 text-xs flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <span className="font-bold text-white truncate max-w-[120px] sm:max-w-[220px]">
               {selectedChallenge?.title || 'Dojo Editor'}
             </span>
-            <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] text-zinc-400 font-mono">
-              Debounced AI Watcher Active
-            </span>
+
+            {/* Language Selector */}
+            <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800">
+              {LANGUAGES.map((lang) => (
+                <button
+                  key={lang.id}
+                  onClick={() => handleLanguageChange(lang.id)}
+                  className={`px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-mono rounded-md font-semibold transition-all ${
+                    selectedLanguage === lang.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={handleResetCode}
-              className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 transition-colors"
-              title="Reset code to original broken state"
+              className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors"
+              title="Reset code"
             >
               <RotateCcw className="w-3 h-3 text-zinc-400" />
-              <span>Reset</span>
+              <span className="hidden sm:inline">Reset</span>
             </button>
 
             <button
               onClick={handleRunTests}
               disabled={isRunningTests}
-              className="px-3.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+              className="px-2.5 sm:px-3.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-1 text-[11px] shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
             >
               <Play className="w-3 h-3 fill-current" />
               <span>{isRunningTests ? 'Evaluating...' : 'Run Tests'}</span>
@@ -252,7 +387,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
 
             <button
               onClick={() => setExplainOpen(true)}
-              className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all cursor-pointer"
+              className="px-2.5 sm:px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-1 text-[11px] shadow-md shadow-rose-600/30 transition-all cursor-pointer"
             >
               <Sparkles className="w-3 h-3" />
               <span>AI Tutor</span>
@@ -260,11 +395,11 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
           </div>
         </div>
 
-        {/* Monaco Editor */}
-        <div className="flex-1 relative min-h-[350px]">
+        {/* Monaco Editor (Visible when in editor view or on desktop) */}
+        <div className={`relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden ${mobileView === 'results' ? 'hidden lg:flex' : 'flex'}`}>
           <MonacoEditorView
             code={code}
-            language={selectedChallenge?.language || 'typescript'}
+            language={selectedLanguage}
             onChange={handleCodeChange}
             onSelectLineForExplain={(line, diag) => {
               setSelectedLine(line);
@@ -276,9 +411,13 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
           />
         </div>
 
-        {/* Bottom Diagnostics / Test Results Tabs */}
-        <div className="h-44 border-t border-zinc-800 bg-zinc-950 flex flex-col">
-          <div className="flex items-center justify-between px-3 bg-zinc-900 border-b border-zinc-800 text-xs">
+        {/* Bottom Diagnostics / Test Results Tabs (Desktop bottom / Mobile results view) */}
+        <div className={`border-t border-zinc-800 bg-zinc-950 flex flex-col flex-shrink-0 ${
+          mobileView === 'results'
+            ? 'flex-1 min-h-0'
+            : 'h-40 lg:h-44 hidden lg:flex'
+        }`}>
+          <div className="flex items-center justify-between px-3 bg-zinc-900 border-b border-zinc-800 text-xs flex-shrink-0">
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setActiveTab('diagnostics')}
@@ -288,7 +427,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
                     : 'border-transparent text-zinc-400 hover:text-zinc-200'
                 }`}
               >
-                Autonomous AI Linting ({diagnostics.length})
+                AI Linting ({diagnostics.length})
               </button>
               <button
                 onClick={() => setActiveTab('tests')}
@@ -302,12 +441,12 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
               </button>
             </div>
 
-            <span className="text-[10px] text-zinc-500 font-mono">
-              Auto-syncing with {persona === 'roast' ? 'RoastSensei' : 'CodeSensei'}
+            <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+              Auto-syncing in {selectedLanguage.toUpperCase()}
             </span>
           </div>
 
-          <div className="flex-1 p-2.5 overflow-y-auto">
+          <div className="flex-1 p-2.5 overflow-y-auto min-h-0">
             {activeTab === 'diagnostics' ? (
               <DiagnosticsList
                 diagnostics={diagnostics}
@@ -334,21 +473,21 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
                   >
                     <div className="flex items-center gap-2">
                       {test.passed === true ? (
-                        <CheckCircle className="w-4 h-4 text-emerald-400" />
+                        <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                       ) : test.passed === false ? (
-                        <XCircle className="w-4 h-4 text-rose-400" />
+                        <XCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
                       ) : (
-                        <Terminal className="w-4 h-4 text-zinc-500" />
+                        <Terminal className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                       )}
-                      <div>
-                        <span className="font-semibold text-zinc-200">{test.name}</span>
-                        <p className="text-[11px] text-zinc-500 font-mono mt-0.5">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-zinc-200 block truncate">{test.name}</span>
+                        <p className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">
                           Input: {test.input} ➔ Expected: {test.expected}
                         </p>
                       </div>
                     </div>
 
-                    <span className="text-[10px] font-mono font-bold">
+                    <span className="text-[10px] font-mono font-bold flex-shrink-0 ml-2">
                       {test.passed === true ? 'PASSED' : test.passed === false ? 'FAILED' : 'READY'}
                     </span>
                   </div>
@@ -362,7 +501,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
       {/* Floating Explain Drawer */}
       <ExplainPanel
         code={code}
-        language={selectedChallenge?.language || 'typescript'}
+        language={selectedLanguage}
         selectedLine={selectedLine}
         selectedDiagnostic={selectedDiag}
         persona={persona}

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { BattleRoomState, BattlePlayer, CommentaryMessage, Challenge, PersonaMode, AiEngine } from '../src/types';
+import { BattleRoomState, BattlePlayer, CommentaryMessage, Challenge, PersonaMode, AiEngine, SupportedLanguage } from '../src/types';
 import { CHALLENGES } from './challenges';
 import { analyzeCodeForLint, generateBattleCommentary, validateChallengeSolution } from './aiService';
 
@@ -15,7 +15,13 @@ export class BattleEngine {
     this.io = io;
   }
 
-  public getOrCreateRoom(roomId: string, challengeId?: string, persona: PersonaMode = 'standard', engine: AiEngine = 'gemini-3.7-flash'): BattleRoomState {
+  public getOrCreateRoom(
+    roomId: string, 
+    challengeId?: string, 
+    persona: PersonaMode = 'standard', 
+    engine: AiEngine = 'gemini-3.7-flash',
+    language: SupportedLanguage = 'javascript'
+  ): BattleRoomState {
     if (this.rooms.has(roomId)) {
       return this.rooms.get(roomId)!;
     }
@@ -24,10 +30,17 @@ export class BattleEngine {
       ? CHALLENGES.find(c => c.id === challengeId) || CHALLENGES[0]
       : CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
 
+    const starterCode = (selectedChallenge.starterCodes && selectedChallenge.starterCodes[language])
+      ? selectedChallenge.starterCodes[language]
+      : selectedChallenge.brokenCode;
+
     const room: BattleRoomState = {
       roomId,
       status: 'waiting',
-      challenge: selectedChallenge,
+      challenge: {
+        ...selectedChallenge,
+        language
+      },
       players: {},
       playerOrder: [],
       countdown: 3,
@@ -39,8 +52,8 @@ export class BattleEngine {
           timestamp: Date.now(),
           speaker: persona === 'roast' ? 'RoastSensei' : 'Sensei',
           text: persona === 'roast'
-            ? `Welcome to the arena of spaghetti code. Today's nightmare: "${selectedChallenge.title}". Ready to see who writes fewer memory leaks?`
-            : `Welcome to CodeSensei Debugging Arena. Challenge: "${selectedChallenge.title}". Prepare your breakpoints and may the cleanest refactor win!`,
+            ? `Welcome to the arena of spaghetti code. Today's DSA challenge: "${selectedChallenge.title}" in ${language.toUpperCase()}. Ready to see who writes fewer edge-case bugs?`
+            : `Welcome to CodeSensei Debugging Arena. DSA Challenge: "${selectedChallenge.title}" in ${language.toUpperCase()}. Prepare your logic and may the cleanest refactor win!`,
           type: 'milestone'
         }
       ],
@@ -54,12 +67,16 @@ export class BattleEngine {
 
   public handleConnection(socket: Socket) {
     // Join or create battle room
-    socket.on('battle:join', ({ roomId, username, avatar, persona, aiEngine, vsAi, challengeId }) => {
-      const room = this.getOrCreateRoom(roomId, challengeId, persona || 'standard', aiEngine || 'gemini-3.7-flash');
+    socket.on('battle:join', ({ roomId, username, avatar, persona, aiEngine, vsAi, challengeId, language }) => {
+      const roomLang: SupportedLanguage = language || 'javascript';
+      const room = this.getOrCreateRoom(roomId, challengeId, persona || 'standard', aiEngine || 'gemini-3.7-flash', roomLang);
       socket.join(roomId);
 
       const playerId = socket.id;
       const isPlayer1 = room.playerOrder.length === 0;
+
+      const starter = (room.challenge.starterCodes && room.challenge.starterCodes[room.challenge.language || 'javascript'])
+        || room.challenge.brokenCode;
 
       const player: BattlePlayer = {
         id: playerId,
@@ -67,7 +84,7 @@ export class BattleEngine {
         avatar: avatar || (isPlayer1 ? '⚡' : '🔥'),
         ready: false,
         score: 0,
-        code: room.challenge.brokenCode,
+        code: starter,
         testResults: {
           passed: 0,
           total: room.challenge.testCases.length,
@@ -89,7 +106,7 @@ export class BattleEngine {
           avatar: '🤖',
           ready: true,
           score: 0,
-          code: room.challenge.brokenCode,
+          code: starter,
           testResults: {
             passed: 0,
             total: room.challenge.testCases.length,
@@ -139,6 +156,22 @@ export class BattleEngine {
       this.debouncePlayerCodeWatch(roomId, socket.id, code);
     });
 
+    // Player switches room language
+    socket.on('battle:set_language', ({ roomId, language }) => {
+      const room = this.rooms.get(roomId);
+      if (!room || room.status === 'active') return;
+
+      room.challenge.language = language;
+      const starter = (room.challenge.starterCodes && room.challenge.starterCodes[language as SupportedLanguage])
+        || room.challenge.brokenCode;
+
+      Object.values(room.players).forEach(p => {
+        p.code = starter;
+      });
+
+      this.broadcastRoomState(roomId);
+    });
+
     // Player runs tests
     socket.on('battle:run_tests', async ({ roomId }) => {
       const room = this.rooms.get(roomId);
@@ -148,7 +181,7 @@ export class BattleEngine {
       const validation = await validateChallengeSolution(
         player.code,
         room.challenge.id,
-        room.challenge.language,
+        room.challenge.language || 'javascript',
         room.challenge.testCases
       );
 
@@ -185,7 +218,7 @@ export class BattleEngine {
     });
 
     // Reset / Rematch
-    socket.on('battle:rematch', ({ roomId, challengeId }) => {
+    socket.on('battle:rematch', ({ roomId, challengeId, language }) => {
       const room = this.rooms.get(roomId);
       if (!room) return;
 
@@ -194,7 +227,14 @@ export class BattleEngine {
         ? CHALLENGES.find(c => c.id === challengeId) || CHALLENGES[0]
         : CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
 
-      room.challenge = nextChallenge;
+      const lang: SupportedLanguage = language || room.challenge.language || 'javascript';
+      const starter = (nextChallenge.starterCodes && nextChallenge.starterCodes[lang])
+        || nextChallenge.brokenCode;
+
+      room.challenge = {
+        ...nextChallenge,
+        language: lang
+      };
       room.status = 'waiting';
       room.countdown = 3;
       room.timeRemaining = room.duration;
@@ -204,7 +244,7 @@ export class BattleEngine {
 
       Object.values(room.players).forEach(p => {
         p.ready = p.isAiBot ? true : false;
-        p.code = nextChallenge.brokenCode;
+        p.code = starter;
         p.isWinner = false;
         p.finishedAt = undefined;
         p.testResults = {
@@ -264,9 +304,13 @@ export class BattleEngine {
     room.startTime = Date.now();
     room.timeRemaining = room.duration;
 
+    const lang = (room.challenge.language || 'javascript') as SupportedLanguage;
+    const starter = (room.challenge.starterCodes && room.challenge.starterCodes[lang])
+      || room.challenge.brokenCode;
+
     // Reset code to fresh broken code
     Object.values(room.players).forEach(p => {
-      p.code = room.challenge.brokenCode;
+      p.code = starter;
     });
 
     room.commentary.push({
@@ -274,8 +318,8 @@ export class BattleEngine {
       timestamp: Date.now(),
       speaker: room.persona === 'roast' ? 'RoastSensei' : 'Sensei',
       text: room.persona === 'roast'
-        ? `🔥 ROUND START! The race is ON! Stop reading the syntax error and start typing!`
-        : `⚔️ ROUND START! Both contestants have received the challenge. Clocks are ticking!`,
+        ? `🔥 ROUND START! The DSA speedrun is ON! Fix those boundary edge cases!`
+        : `⚔️ ROUND START! Both contestants have received the algorithm challenge. Clocks are ticking!`,
       type: 'action'
     });
 
@@ -318,8 +362,14 @@ export class BattleEngine {
 
   private startBotSimulation(room: BattleRoomState, bot: BattlePlayer) {
     let step = 0;
-    const solutionLines = room.challenge.solutionCode.split('\n');
-    const brokenLines = room.challenge.brokenCode.split('\n');
+    const lang = (room.challenge.language || 'javascript') as SupportedLanguage;
+    const sol = (room.challenge.solutions && room.challenge.solutions[lang])
+      || room.challenge.solutionCode;
+    const starter = (room.challenge.starterCodes && room.challenge.starterCodes[lang])
+      || room.challenge.brokenCode;
+
+    const solutionLines = sol.split('\n');
+    const brokenLines = starter.split('\n');
 
     const botInterval = setInterval(async () => {
       if (room.status !== 'active') {
@@ -330,17 +380,16 @@ export class BattleEngine {
       step++;
       // Progressively modify code towards solution
       if (step === 2) {
-        // Fix part of the code
-        bot.code = brokenLines.slice(0, 5).join('\n') + '\n  // AI Bot refactoring logic...\n' + solutionLines.slice(5, 15).join('\n') + '\n' + brokenLines.slice(15).join('\n');
+        bot.code = brokenLines.slice(0, 4).join('\n') + '\n  // AI Bot refactoring logic...\n' + solutionLines.slice(4, 12).join('\n') + '\n' + brokenLines.slice(12).join('\n');
         bot.testResults.passed = Math.min(1, room.challenge.testCases.length);
         this.broadcastRoomState(room.roomId);
       } else if (step === 4) {
-        bot.code = solutionLines.slice(0, Math.floor(solutionLines.length * 0.75)).join('\n') + '\n' + brokenLines.slice(Math.floor(brokenLines.length * 0.75)).join('\n');
+        bot.code = solutionLines.slice(0, Math.floor(solutionLines.length * 0.8)).join('\n') + '\n' + brokenLines.slice(Math.floor(brokenLines.length * 0.8)).join('\n');
         bot.testResults.passed = Math.max(1, room.challenge.testCases.length - 1);
         this.broadcastRoomState(room.roomId);
       } else if (step === 7) {
         // Bot finishes solution
-        bot.code = room.challenge.solutionCode;
+        bot.code = sol;
         bot.testResults.passed = room.challenge.testCases.length;
         this.endBattle(room.roomId, bot.id);
         clearInterval(botInterval);
@@ -363,7 +412,7 @@ export class BattleEngine {
       try {
         const diagnostics = await analyzeCodeForLint(
           code,
-          room.challenge.language,
+          room.challenge.language || 'javascript',
           room.persona,
           room.aiEngine
         );
@@ -448,8 +497,8 @@ export class BattleEngine {
       timestamp: Date.now(),
       speaker: room.persona === 'roast' ? 'RoastSensei' : 'Sensei',
       text: room.persona === 'roast'
-        ? `⏰ TIME'S UP! The clock ran out and both of you are still debugging! The production server has crashed!`
-        : `⏰ Time's up! The debugging round has concluded.`,
+        ? `⏰ TIME'S UP! Both contestants ran out the clock. Hope you enjoyed debugging on production!`
+        : `⏰ TIME EXPIRED! The round has concluded. Well fought!`,
       type: 'win'
     });
 
@@ -458,32 +507,32 @@ export class BattleEngine {
 
   private endBattle(roomId: string, winnerId: string) {
     const room = this.rooms.get(roomId);
-    if (!room || room.status === 'finished') return;
+    if (!room) return;
 
     this.clearRoomTimers(roomId);
     room.status = 'finished';
-    room.endTime = Date.now();
     room.winnerId = winnerId;
+    room.endTime = Date.now();
 
     const winner = room.players[winnerId];
     if (winner) {
       winner.isWinner = true;
       winner.finishedAt = Date.now();
       winner.score += 100;
-
-      const timeTaken = Math.round((room.endTime - (room.startTime || room.endTime)) / 1000);
-
-      room.commentary.push({
-        id: `comm-win-${Date.now()}`,
-        timestamp: Date.now(),
-        speaker: room.persona === 'roast' ? 'RoastSensei' : 'Sensei',
-        text: room.persona === 'roast'
-          ? `🏆 VICTORY TO ${winner.username}! Cleaned up the spaghetti in ${timeTaken} seconds! The other player is officially on PR review duty for a week!`
-          : `🏆 VICTORY TO ${winner.username}! All unit tests passed in ${timeTaken} seconds with clean architecture!`,
-        highlightPlayerId: winnerId,
-        type: 'win'
-      });
     }
+
+    const elapsedSeconds = room.startTime ? Math.floor((Date.now() - room.startTime) / 1000) : 0;
+
+    room.commentary.push({
+      id: `comm-win-${Date.now()}`,
+      timestamp: Date.now(),
+      speaker: room.persona === 'roast' ? 'RoastSensei' : 'Sensei',
+      text: room.persona === 'roast'
+        ? `🏆 VICTORY! ${winner?.username || 'Player'} solved the challenge in ${elapsedSeconds}s! Opponent, your code looks like it was written in 1995.`
+        : `🏆 VICTORY! ${winner?.username || 'Player'} has passed 100% of test cases in ${elapsedSeconds}s! Brilliant algorithm execution!`,
+      type: 'win',
+      highlightPlayerId: winnerId
+    });
 
     this.broadcastRoomState(roomId);
   }
@@ -505,7 +554,8 @@ export class BattleEngine {
 
   private broadcastRoomState(roomId: string) {
     const room = this.rooms.get(roomId);
-    if (!room) return;
-    this.io.to(roomId).emit('battle:state', room);
+    if (room) {
+      this.io.to(roomId).emit('battle:state', room);
+    }
   }
 }

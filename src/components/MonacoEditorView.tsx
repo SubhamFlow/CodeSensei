@@ -173,9 +173,9 @@ export const MonacoEditorView: React.FC<MonacoEditorViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-xl">
+    <div className="flex flex-col h-full w-full bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-xl min-h-0">
       {headerTitle && (
-        <div className="flex items-center justify-between px-3.5 py-2 bg-zinc-900 border-b border-zinc-800 text-xs font-mono text-zinc-300">
+        <div className="flex items-center justify-between px-3.5 py-2 bg-zinc-900 border-b border-zinc-800 text-xs font-mono text-zinc-300 flex-shrink-0">
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-rose-500/80 inline-block" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-500/80 inline-block" />
@@ -193,7 +193,7 @@ export const MonacoEditorView: React.FC<MonacoEditorViewProps> = ({
         </div>
       )}
 
-      <div className="flex-1 w-full min-h-[300px] relative">
+      <div className="flex-1 w-full h-full min-h-0 relative">
         <Editor
           height={height}
           language={language}
@@ -207,17 +207,32 @@ export const MonacoEditorView: React.FC<MonacoEditorViewProps> = ({
             lineHeight: 22,
             fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace",
             minimap: { enabled: true, scale: 0.75 },
-            scrollBeyondLastLine: false,
+            scrollBeyondLastLine: true,
+            scrollBeyondLastColumn: 5,
             wordWrap: 'on',
+            wrappingStrategy: 'advanced',
             automaticLayout: true,
             glyphMargin: true,
             tabSize: 2,
             cursorBlinking: 'smooth',
             cursorSmoothCaretAnimation: 'on',
             smoothScrolling: true,
+            mouseWheelScrollSensitivity: 1,
+            fastScrollSensitivity: 5,
+            scrollbar: {
+              vertical: 'visible',
+              horizontal: 'visible',
+              verticalScrollbarSize: 12,
+              horizontalScrollbarSize: 12,
+              verticalSliderSize: 12,
+              horizontalSliderSize: 12,
+              alwaysConsumeMouseWheel: true,
+              handleMouseWheel: true,
+            },
             bracketPairColorization: { enabled: true },
             lineNumbersMinChars: 3,
             renderLineHighlight: 'all',
+            fixedOverflowWidgets: true,
           }}
         />
       </div>

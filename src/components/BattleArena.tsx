@@ -31,13 +31,21 @@ import {
   CodeDiagnostic, 
   PersonaMode, 
   AiEngine, 
-  Challenge 
+  Challenge,
+  SupportedLanguage
 } from '../types';
 
 interface BattleArenaProps {
   persona: PersonaMode;
   aiEngine: AiEngine;
 }
+
+const LANGUAGES: Array<{ id: SupportedLanguage; label: string }> = [
+  { id: 'javascript', label: 'JavaScript' },
+  { id: 'python', label: 'Python' },
+  { id: 'cpp', label: 'C++' },
+  { id: 'java', label: 'Java' }
+];
 
 export const BattleArena: React.FC<BattleArenaProps> = ({
   persona,
@@ -50,6 +58,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   });
   const [username, setUsername] = useState(() => localStorage.getItem('codesensei_username') || `Ninja_${Math.floor(Math.random() * 900 + 100)}`);
   const [roomState, setRoomState] = useState<BattleRoomState | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('javascript');
   const [myCode, setMyCode] = useState('');
   const [myDiagnostics, setMyDiagnostics] = useState<CodeDiagnostic[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -60,6 +69,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   const [allChallenges, setAllChallenges] = useState<Challenge[]>([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'editor' | 'tests' | 'commentary'>('editor');
+  const [mobileTab, setMobileTab] = useState<'my-arena' | 'opponent' | 'commentary'>('my-arena');
   const commentaryEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch challenge catalog on mount
@@ -81,11 +91,15 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
       persona,
       aiEngine,
       vsAi: vsAiBot,
-      challengeId: selectedChallengeId
+      challengeId: selectedChallengeId,
+      language: selectedLanguage
     });
 
     const handleRoomState = (state: BattleRoomState) => {
       setRoomState(state);
+      if (state.challenge?.language) {
+        setSelectedLanguage(state.challenge.language as SupportedLanguage);
+      }
       const me = state.players[socket.id || ''];
       if (me) {
         // Sync code if initializing or restarting
@@ -157,6 +171,19 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
     });
   };
 
+  const handleLanguageSelect = (lang: SupportedLanguage) => {
+    setSelectedLanguage(lang);
+    if (roomState && roomState.status !== 'active') {
+      socket.emit('battle:set_language', {
+        roomId,
+        language: lang
+      });
+      if (roomState.challenge?.starterCodes && roomState.challenge.starterCodes[lang]) {
+        setMyCode(roomState.challenge.starterCodes[lang]);
+      }
+    }
+  };
+
   const handleToggleReady = () => {
     const me = roomState?.players[socket.id || ''];
     socket.emit('battle:ready', {
@@ -172,7 +199,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   const handleRematch = () => {
     socket.emit('battle:rematch', {
       roomId,
-      challengeId: selectedChallengeId
+      challengeId: selectedChallengeId,
+      language: selectedLanguage
     });
   };
 
@@ -189,6 +217,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   const opponentId = roomState?.playerOrder.find(id => id !== myPlayerId);
   const opponentPlayer = opponentId ? roomState?.players[opponentId] : null;
 
+  const currentRoomLanguage = (roomState?.challenge.language || selectedLanguage) as SupportedLanguage;
+
   // Format timer
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -197,92 +227,140 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-62px)] bg-zinc-950 overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
       {/* Match Banner & Progress Bar */}
-      <div className="px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div className="px-3 sm:px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-xs flex-shrink-0">
         {/* Left: Challenge info */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded bg-rose-500/20 text-rose-400">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <span className="p-1 rounded bg-rose-500/20 text-rose-400 flex-shrink-0">
               <Swords className="w-4 h-4" />
             </span>
-            <span className="font-bold text-white text-sm">
+            <span className="font-bold text-white text-xs sm:text-sm truncate max-w-[120px] sm:max-w-[200px]">
               {roomState?.challenge.title || 'Loading Battle...'}
             </span>
           </div>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-800 text-amber-300 border border-zinc-700">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-800 text-amber-300 border border-zinc-700 flex-shrink-0">
             {roomState?.challenge.difficulty || 'Medium'}
           </span>
-          <span className="text-zinc-500 font-mono hidden md:inline">
-            Room: {roomId}
-          </span>
+
+          {/* Language Selector */}
+          <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 flex-shrink-0">
+            {LANGUAGES.map((lang) => (
+              <button
+                key={lang.id}
+                onClick={() => handleLanguageSelect(lang.id)}
+                disabled={roomState?.status === 'active'}
+                className={`px-1.5 sm:px-2 py-0.5 text-[10px] font-mono rounded font-semibold transition-all ${
+                  currentRoomLanguage === lang.id
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 disabled:opacity-50'
+                }`}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Center: Live Timer & Match Status */}
-        <div className="flex items-center gap-3">
+        {/* Center / Right: Live Timer, Ready Button, Opponent & Share */}
+        <div className="flex items-center gap-2">
           {roomState?.status === 'active' && (
-            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-xl font-mono text-sm font-bold border transition-colors ${
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-mono text-xs sm:text-sm font-bold border transition-colors ${
               (roomState.timeRemaining || 0) <= 30
                 ? 'bg-rose-950/80 border-rose-600 text-rose-300 animate-pulse'
                 : 'bg-zinc-950 border-zinc-700 text-zinc-100'
             }`}>
-              <Clock className="w-4 h-4 text-rose-400" />
+              <Clock className="w-3.5 h-3.5 text-rose-400" />
               <span>{formatTime(roomState.timeRemaining || 0)}</span>
             </div>
           )}
 
           {roomState?.status === 'waiting' && (
-            <div className="flex items-center gap-2">
-              <button
-                id="ready-toggle-btn"
-                onClick={handleToggleReady}
-                className={`px-4 py-1.5 rounded-xl font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
-                  myPlayer?.ready
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-bounce'
-                }`}
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                <span>{myPlayer?.ready ? 'Ready! Waiting for Opponent...' : 'Click Ready to Battle!'}</span>
-              </button>
-            </div>
+            <button
+              id="ready-toggle-btn"
+              onClick={handleToggleReady}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1 cursor-pointer ${
+                myPlayer?.ready
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                  : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 animate-bounce'
+              }`}
+            >
+              <Play className="w-3 h-3 fill-current" />
+              <span>{myPlayer?.ready ? 'Ready!' : 'Click Ready!'}</span>
+            </button>
           )}
-        </div>
 
-        {/* Right: Opponent toggle & Share */}
-        <div className="flex items-center gap-2">
           <button
             onClick={() => setVsAiBot(!vsAiBot)}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition-colors flex items-center gap-1.5 ${
+            className={`px-2 py-1 rounded-lg border text-[10px] sm:text-[11px] font-semibold transition-colors flex items-center gap-1 ${
               vsAiBot
                 ? 'bg-indigo-950/70 border-indigo-600/60 text-indigo-300'
                 : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
             }`}
-            title="Toggle between Sensei AI Ghost Opponent or Friend Multiplayer"
+            title="Toggle Ghost Bot / Multiplayer"
           >
-            <Bot className="w-3.5 h-3.5 text-indigo-400" />
-            <span>{vsAiBot ? 'Opponent: AI Ghost Bot' : 'Multiplayer Room'}</span>
+            <Bot className="w-3 h-3 text-indigo-400" />
+            <span className="hidden sm:inline">{vsAiBot ? 'AI Bot' : 'P2P'}</span>
           </button>
 
           <button
             onClick={handleCopyShareLink}
-            className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 flex items-center gap-1 text-[11px] transition-colors"
-            title="Share battle room link with a friend"
+            className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 flex items-center gap-1 text-[10px] sm:text-[11px] transition-colors"
+            title="Share battle room link"
           >
             {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Share2 className="w-3 h-3 text-zinc-400" />}
-            <span>{copiedLink ? 'Copied!' : 'Invite 1v1'}</span>
+            <span className="hidden sm:inline">{copiedLink ? 'Copied' : 'Invite'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Sub-Navigation Bar (< lg screens) */}
+      <div className="lg:hidden flex items-center justify-between px-2 py-1 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 text-xs">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMobileTab('my-arena')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileTab === 'my-arena'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Your Arena
+          </button>
+          <button
+            onClick={() => setMobileTab('opponent')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileTab === 'opponent'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Opponent ({opponentPlayer?.testResults.passed || 0}/{opponentPlayer?.testResults.total || 4})
+          </button>
+          <button
+            onClick={() => setMobileTab('commentary')}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mobileTab === 'commentary'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Broadcast ({roomState?.commentary.length || 0})
           </button>
         </div>
       </div>
 
       {/* Main Dual Arena Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
         {/* Left / Top: Active Player Coding Arena */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-zinc-800/80 bg-zinc-950">
+        <div className={`flex-1 flex flex-col min-w-0 border-r border-zinc-800/80 bg-zinc-950 ${
+          mobileTab === 'my-arena' ? 'flex' : 'hidden lg:flex'
+        }`}>
           {/* Player header with test indicator */}
-          <div className="px-3.5 py-2 bg-zinc-900/60 border-b border-zinc-800 flex items-center justify-between text-xs">
+          <div className="px-3 py-2 bg-zinc-900/60 border-b border-zinc-800 flex items-center justify-between text-xs flex-shrink-0">
             <div className="flex items-center gap-2">
-              <div className="h-6 w-6 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xs">
+              <div className="h-5 w-5 sm:h-6 sm:w-6 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xs">
                 {myPlayer?.avatar || '⚡'}
               </div>
               <span className="font-bold text-white">
@@ -294,20 +372,20 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
             </div>
 
             {/* Run Tests / Submit button */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 id="run-tests-btn"
                 onClick={handleRunTests}
                 disabled={roomState?.status !== 'active'}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+                className="px-2.5 sm:px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg font-bold flex items-center gap-1 text-[11px] shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
               >
                 <Play className="w-3 h-3 fill-current" />
-                <span>Run Test Suite</span>
+                <span>Run Tests</span>
               </button>
 
               <button
                 onClick={() => setExplainOpen(true)}
-                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 transition-colors"
+                className="px-2 sm:px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors"
               >
                 <Bot className="w-3.5 h-3.5 text-rose-400" />
                 <span className="hidden sm:inline">AI Tutor</span>
@@ -316,10 +394,10 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
           </div>
 
           {/* Player Monaco Editor */}
-          <div className="flex-1 relative min-h-[350px]">
+          <div className="relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden">
             <MonacoEditorView
-              code={myCode || (roomState?.challenge.brokenCode || '')}
-              language={roomState?.challenge.language || 'typescript'}
+              code={myCode || (roomState?.challenge.starterCodes?.[currentRoomLanguage] || roomState?.challenge.brokenCode || '')}
+              language={currentRoomLanguage}
               onChange={handleCodeChange}
               onSelectLineForExplain={(line, diag) => {
                 setSelectedLine(line);
@@ -345,8 +423,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
           </div>
 
           {/* Bottom Diagnostics / Test Results Tabs */}
-          <div className="h-44 border-t border-zinc-800 bg-zinc-950 flex flex-col">
-            <div className="flex items-center justify-between px-3 bg-zinc-900 border-b border-zinc-800 text-xs">
+          <div className="h-36 lg:h-44 border-t border-zinc-800 bg-zinc-950 flex flex-col flex-shrink-0">
+            <div className="flex items-center justify-between px-3 bg-zinc-900 border-b border-zinc-800 text-xs flex-shrink-0">
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setActiveTab('editor')}
@@ -371,7 +449,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
               </div>
             </div>
 
-            <div className="flex-1 p-2 overflow-y-auto">
+            <div className="flex-1 p-2 overflow-y-auto min-h-0">
               {activeTab === 'editor' ? (
                 <DiagnosticsList
                   diagnostics={myDiagnostics}
@@ -414,9 +492,13 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
         </div>
 
         {/* Right: Opponent Live Preview & Play-by-Play Shoutcaster */}
-        <div className="w-full lg:w-[420px] flex flex-col bg-zinc-950 border-l border-zinc-800">
+        <div className={`w-full lg:w-[420px] flex-col bg-zinc-950 border-l border-zinc-800 ${
+          mobileTab !== 'my-arena' ? 'flex flex-1 min-h-0' : 'hidden lg:flex'
+        }`}>
           {/* Opponent live status header */}
-          <div className="px-3.5 py-2 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs">
+          <div className={`px-3.5 py-2 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs flex-shrink-0 ${
+            mobileTab === 'commentary' ? 'hidden lg:flex' : 'flex'
+          }`}>
             <div className="flex items-center gap-2">
               <div className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
                 {opponentPlayer?.avatar || '🤖'}
@@ -442,118 +524,90 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
           </div>
 
           {/* Opponent Code Preview (Read-only live shadow editor) */}
-          <div className="h-56 relative bg-zinc-950 border-b border-zinc-800">
+          <div className={`relative bg-zinc-950 border-b border-zinc-800 flex flex-col overflow-hidden ${
+            mobileTab === 'opponent'
+              ? 'flex-1 min-h-0'
+              : mobileTab === 'commentary'
+              ? 'hidden lg:block lg:h-56 lg:flex-shrink-0'
+              : 'h-56 flex-shrink-0'
+          }`}>
             <MonacoEditorView
               code={opponentPlayer?.code || '// Waiting for opponent to connect or start...'}
-              language={roomState?.challenge.language || 'typescript'}
+              language={currentRoomLanguage}
               readOnly={true}
               headerTitle="OPPONENT LIVE FEED"
             />
           </div>
 
-          {/* AI Narrator: Play-by-Play Shoutcaster Feed */}
-          <div className="flex-1 flex flex-col min-h-[250px] bg-zinc-950">
-            <div className="px-3.5 py-2 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between text-xs">
+          {/* AI Shoutcaster Play-by-Play & Commentary Terminal */}
+          <div className={`flex-col min-h-0 bg-zinc-950 ${
+            mobileTab === 'commentary' ? 'flex flex-1' : 'hidden lg:flex lg:flex-1'
+          }`}>
+            <div className="px-3 py-2 bg-zinc-900/80 border-b border-zinc-800 flex items-center justify-between text-xs flex-shrink-0">
               <div className="flex items-center gap-2">
-                {persona === 'roast' ? (
-                  <Flame className="w-4 h-4 text-orange-400" />
-                ) : (
-                  <Terminal className="w-4 h-4 text-rose-400" />
-                )}
-                <span className="font-bold text-white">
-                  {persona === 'roast' ? 'Roast Shoutcaster Live' : 'AI Play-by-Play Narrator'}
+                <Flame className="w-4 h-4 text-rose-400" />
+                <span className="font-bold text-white uppercase tracking-wider text-[11px]">
+                  {persona === 'roast' ? 'RoastSensei Live Commentary' : 'AI Match Broadcast'}
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-zinc-500 animate-pulse">
-                ● LIVE
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/40 font-mono">
+                LIVE
               </span>
             </div>
 
-            {/* Commentary event stream */}
-            <div className="flex-1 p-3 space-y-2.5 overflow-y-auto text-xs">
+            {/* Commentary Feed */}
+            <div className="flex-1 min-h-0 p-3 space-y-2.5 overflow-y-auto font-mono text-xs">
               {roomState?.commentary.map((comm) => (
-                <div
+                <div 
                   key={comm.id}
-                  className={`p-2.5 rounded-xl border leading-relaxed ${
-                    comm.type === 'win'
-                      ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
-                      : comm.type === 'roast'
-                      ? 'bg-orange-950/20 border-orange-800/40 text-orange-200'
-                      : comm.type === 'milestone'
-                      ? 'bg-indigo-950/20 border-indigo-800/40 text-indigo-200'
+                  className={`p-2.5 rounded-xl border leading-relaxed animate-fade-in ${
+                    comm.type === 'win' 
+                      ? 'bg-amber-950/30 border-amber-500/50 text-amber-200' 
+                      : comm.type === 'action'
+                      ? 'bg-rose-950/20 border-rose-800/40 text-rose-200'
                       : 'bg-zinc-900/80 border-zinc-800 text-zinc-300'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1 text-[10px] text-zinc-500 font-mono">
-                    <span className="font-bold text-zinc-400">{comm.speaker}</span>
-                    <span>{new Date(comm.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500 mb-1">
+                    <span className="font-bold text-rose-400">{comm.speaker}</span>
+                    <span>{new Date(comm.timestamp).toLocaleTimeString()}</span>
                   </div>
-                  <p>{comm.text}</p>
+                  <p className="text-xs">{comm.text}</p>
                 </div>
               ))}
               <div ref={commentaryEndRef} />
             </div>
+
+            {/* Match Finished Banner / Rematch CTA */}
+            {roomState?.status === 'finished' && (
+              <div className="p-3 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between gap-3 animate-fade-in flex-shrink-0">
+                <div>
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    {roomState.winnerId === socket.id ? 'You won the match!' : 'Match Finished!'}
+                  </span>
+                  <span className="text-[10px] text-zinc-400">
+                    Ready for another round?
+                  </span>
+                </div>
+
+                <button
+                  onClick={handleRematch}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-md shadow-indigo-600/30 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Rematch</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Victory / Defeat Modal */}
-      {roomState?.status === 'finished' && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl max-w-md w-full p-6 text-center shadow-2xl animate-fade-in">
-            <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 mx-auto flex items-center justify-center mb-4 ring-8 ring-amber-500/10">
-              <Trophy className="w-8 h-8" />
-            </div>
-
-            <h2 className="text-2xl font-black text-white mb-1">
-              {roomState.winnerId === myPlayerId
-                ? '🏆 YOU ARE VICTORIOUS!'
-                : roomState.winnerId
-                ? '💀 DEFEAT - OPPONENT WON'
-                : "⏰ TIME'S UP - DRAW"}
-            </h2>
-
-            <p className="text-xs text-zinc-400 mb-6">
-              {roomState.winnerId === myPlayerId
-                ? 'You squashed all bugs and passed the test suite first!'
-                : 'The production outage claimed a victim. Ready for revenge?'}
-            </p>
-
-            {/* Select Next Challenge */}
-            <div className="mb-6 text-left">
-              <label className="block text-xs font-semibold text-zinc-300 mb-2">
-                Next Battle Challenge:
-              </label>
-              <select
-                value={selectedChallengeId}
-                onChange={(e) => setSelectedChallengeId(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-rose-500"
-              >
-                {allChallenges.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title} ({c.difficulty})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleRematch}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 cursor-pointer text-sm"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Play Rematch</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Floating Explain Drawer */}
+      {/* Explain Drawer */}
       <ExplainPanel
-        code={myCode}
-        language={roomState?.challenge.language || 'typescript'}
+        code={myCode || (roomState?.challenge.starterCodes?.[currentRoomLanguage] || '')}
+        language={currentRoomLanguage}
         selectedLine={selectedLine}
         selectedDiagnostic={selectedDiag}
         persona={persona}

@@ -714,24 +714,48 @@ Return JSON with this exact schema:
   // Deterministic local validator fallback
   const isBuggy = code.includes('// BUG:') || code.includes('/* BUG') || code.includes('// BUG');
   
-  // Specific checks for challenges
+  // Specific checks for DSA challenges
   let passedCount = 0;
   if (!isBuggy) {
-    if (challengeId === 'binary-search-boundary') {
-      const hasCorrectBounds = code.includes('nums.length - 1') && code.includes('left <= right');
-      passedCount = hasCorrectBounds ? testCases.length : 1;
-    } else if (challengeId === 'matrix-spiral-boundary') {
-      const hasGuards = code.includes('top <= bottom') && code.includes('left <= right');
-      passedCount = hasGuards ? testCases.length : 1;
-    } else if (challengeId === 'lru-cache-eviction') {
-      const hasMoveToHead = code.includes('moveToHead') || (code.includes('removeNode') && code.includes('addToHead'));
-      passedCount = hasMoveToHead ? testCases.length : 1;
-    } else if (challengeId === 'async-queue-race') {
-      const hasWhileOrLoop = code.includes('while') || code.includes('this.running < this.concurrency');
-      passedCount = hasWhileOrLoop ? testCases.length : 1;
-    } else if (challengeId === 'deep-clone-circular') {
-      const hasWeakMap = code.includes('WeakMap') || code.includes('hash.has');
-      passedCount = hasWeakMap ? testCases.length : 1;
+    if (challengeId === 'number-of-islands') {
+      const hasDfsBfs = code.includes('dfs') || code.includes('bfs') || code.includes('sink') || code.includes('queue') || code.includes('visit');
+      passedCount = hasDfsBfs ? testCases.length : 1;
+    } else if (challengeId === 'course-schedule') {
+      const hasCycleCheck = code.includes('visiting') || code.includes('visited') || code.includes('indegree') || code.includes('inDegree') || code.includes('kahn');
+      passedCount = hasCycleCheck ? testCases.length : 1;
+    } else if (challengeId === 'lowest-common-ancestor-bst') {
+      const hasComparison = (code.includes('val <') || code.includes('val >') || code.includes('data <') || code.includes('data >') || code.includes('->val'));
+      passedCount = hasComparison ? testCases.length : 1;
+    } else if (challengeId === 'validate-binary-search-tree') {
+      const hasMinMax = code.includes('min') || code.includes('max') || code.includes('prev') || code.includes('Long.MIN_VALUE') || code.includes('LONG_MIN') || code.includes('float');
+      passedCount = hasMinMax ? testCases.length : 1;
+    } else if (challengeId === 'search-rotated-sorted-array') {
+      const hasMid = (code.includes('left <= right') || code.includes('left < right') || code.includes('low <= high')) && (code.includes('mid') || code.includes('m'));
+      passedCount = hasMid ? testCases.length : 1;
+    } else if (challengeId === 'longest-increasing-subsequence') {
+      const hasDpOrBisect = code.includes('dp') || code.includes('tails') || code.includes('binarySearch') || code.includes('bisect') || code.includes('lower_bound');
+      passedCount = hasDpOrBisect ? testCases.length : 1;
+    } else if (challengeId === 'trapping-rain-water') {
+      const hasTwoPointersOrStack = (code.includes('left') && code.includes('right')) || code.includes('stack') || code.includes('leftMax') || code.includes('left_max');
+      passedCount = hasTwoPointersOrStack ? testCases.length : 1;
+    } else if (challengeId === 'lru-cache') {
+      const hasLRULogic = code.includes('capacity') || code.includes('head') || code.includes('tail') || code.includes('LinkedHashMap') || code.includes('OrderedDict') || code.includes('list');
+      passedCount = hasLRULogic ? testCases.length : 1;
+    } else if (challengeId === 'coin-change') {
+      const hasProperDP = code.includes('amount + 1') || code.includes('1e9') || code.includes('INT_MAX') || code.includes('Integer.MAX_VALUE') || code.includes('float');
+      passedCount = hasProperDP ? testCases.length : 1;
+    } else if (challengeId === 'word-search') {
+      const hasBacktrackRestore = (code.includes('board[r][c] = temp') || code.includes('board[r][c] = original') || code.includes('board[r][c] = ch') || code.includes('board[r][c]=temp'));
+      passedCount = hasBacktrackRestore ? testCases.length : 1;
+    } else if (challengeId === 'invert-binary-tree') {
+      const hasTemporarySwap = (code.includes('left =') && code.includes('right =') && (code.includes('root.left = right') || code.includes('root->left = right') || code.includes('root.left = self.invertTree')));
+      passedCount = hasTemporarySwap ? testCases.length : 1;
+    } else if (challengeId === 'min-cost-climbing-stairs') {
+      const hasCorrectCostDP = (code.includes('cost[i]') || code.includes('cost[i - 1]') || code.includes('first') || code.includes('second'));
+      passedCount = hasCorrectCostDP ? testCases.length : 1;
+    } else if (challengeId === 'valid-parentheses') {
+      const hasMatchingMap = (code.includes('map[c]') || code.includes('mapping') || code.includes("=== '('") || code.includes("== '('") || code.includes("st.top()") || code.includes("stack.pop()"));
+      passedCount = hasMatchingMap ? testCases.length : 1;
     } else {
       passedCount = testCases.length;
     }

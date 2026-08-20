@@ -1,5 +1,6 @@
 export type PersonaMode = 'standard' | 'roast';
 export type AiEngine = 'groq-llama3.3' | 'gemini-3.7-flash';
+export type SupportedLanguage = 'javascript' | 'python' | 'cpp' | 'java';
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'roast';
 
@@ -30,11 +31,23 @@ export interface Challenge {
   id: string;
   title: string;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Nightmare';
-  language: 'javascript' | 'typescript' | 'python';
-  category: string;
+  language?: SupportedLanguage;
+  category: 'Graphs' | 'Trees' | 'Algorithms & Searching' | 'Dynamic Programming' | 'Data Structures' | string;
   description: string;
   brokenCode: string;
   solutionCode: string;
+  starterCodes: {
+    javascript: string;
+    python: string;
+    cpp: string;
+    java: string;
+  };
+  solutions: {
+    javascript: string;
+    python: string;
+    cpp: string;
+    java: string;
+  };
   hints: string[];
   testCases: TestCase[];
   testRunnerScript?: string;

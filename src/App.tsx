@@ -90,8 +90,8 @@ export default function App() {
         onOpenHelp={() => setHelpOpen(true)}
       />
 
-      {/* Main Mode View */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      {/* Main Mode View - scrollable on mobile/tablet, full-height on desktop */}
+      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto lg:overflow-hidden">
         {currentTab === 'battle' && (
           <BattleArena persona={persona} aiEngine={aiEngine} />
         )}

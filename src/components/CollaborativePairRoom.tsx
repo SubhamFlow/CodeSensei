@@ -17,12 +17,19 @@ import { getSocket } from '../lib/socket';
 import { MonacoEditorView } from './MonacoEditorView';
 import { ExplainPanel } from './ExplainPanel';
 import { DiagnosticsList } from './DiagnosticsList';
-import { CodeDiagnostic, PersonaMode, AiEngine } from '../types';
+import { CodeDiagnostic, PersonaMode, AiEngine, SupportedLanguage } from '../types';
 
 interface CollaborativePairRoomProps {
   persona: PersonaMode;
   aiEngine: AiEngine;
 }
+
+const LANGUAGES: Array<{ id: SupportedLanguage; label: string }> = [
+  { id: 'javascript', label: 'JavaScript' },
+  { id: 'python', label: 'Python' },
+  { id: 'cpp', label: 'C++' },
+  { id: 'java', label: 'Java' }
+];
 
 export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
   persona,
@@ -34,6 +41,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     return urlParams.get('pair') || 'global-pair-room';
   });
   const [username, setUsername] = useState(() => localStorage.getItem('codesensei_username') || `Dev_${Math.floor(Math.random() * 900 + 100)}`);
+  const [language, setLanguage] = useState<SupportedLanguage>('javascript');
   const [code, setCode] = useState('');
   const [diagnostics, setDiagnostics] = useState<CodeDiagnostic[]>([]);
   const [peers, setPeers] = useState<Array<{ id: string; name: string; color: string; cursor?: { line: number; column: number } }>>([]);
@@ -43,6 +51,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
   const [explainOpen, setExplainOpen] = useState(false);
   const [selectedLine, setSelectedLine] = useState<number | undefined>();
   const [selectedDiag, setSelectedDiag] = useState<CodeDiagnostic | undefined>();
+  const [mobileTab, setMobileTab] = useState<'code' | 'chat'>('code');
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Connect to Pair Room
@@ -95,7 +104,8 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     setCode(newCode);
     socket.emit('pair:edit', {
       roomId,
-      code: newCode
+      code: newCode,
+      language
     });
   };
 
@@ -103,7 +113,8 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     socket.emit('pair:edit', {
       roomId,
       code,
-      cursor
+      cursor,
+      language
     });
   };
 
@@ -127,23 +138,73 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row h-[calc(100vh-62px)] bg-zinc-950 overflow-hidden">
+    <div className="flex-1 flex flex-col lg:flex-row min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
+      {/* Mobile Sub-Navigation Bar (< lg screens) */}
+      <div className="lg:hidden flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 text-xs">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setMobileTab('code')}
+            className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+              mobileTab === 'code'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Code & Diagnostics
+          </button>
+          <button
+            onClick={() => setMobileTab('chat')}
+            className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+              mobileTab === 'chat'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Live Chat ({messages.length})
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>{peers.length} Online</span>
+        </div>
+      </div>
+
       {/* Main Coding Area */}
-      <div className="flex-1 flex flex-col min-w-0 border-r border-zinc-800 bg-zinc-950">
+      <div className={`flex-1 flex-col min-w-0 border-r border-zinc-800 bg-zinc-950 min-h-0 ${
+        mobileTab === 'code' ? 'flex' : 'hidden lg:flex'
+      }`}>
         {/* Pair room header */}
-        <div className="px-4 py-2.5 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="p-1 rounded bg-emerald-500/20 text-emerald-400">
+        <div className="px-3 sm:px-4 py-2 sm:py-2.5 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-xs flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="p-1 rounded bg-emerald-500/20 text-emerald-400 flex-shrink-0">
                 <Users className="w-4 h-4" />
               </span>
-              <span className="font-bold text-white text-sm">
-                Pair Room: #{roomId}
+              <span className="font-bold text-white text-xs sm:text-sm truncate">
+                Room #{roomId}
               </span>
             </div>
 
+            {/* Language Selector */}
+            <div className="flex items-center bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 flex-shrink-0">
+              {LANGUAGES.map((lang) => (
+                <button
+                  key={lang.id}
+                  onClick={() => setLanguage(lang.id)}
+                  className={`px-1.5 sm:px-2 py-0.5 text-[10px] font-mono rounded font-semibold transition-all ${
+                    language === lang.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              ))}
+            </div>
+
             {/* Active peer badges */}
-            <div className="flex items-center gap-1">
+            <div className="hidden sm:flex items-center gap-1">
               {peers.map((peer) => (
                 <div
                   key={peer.id}
@@ -156,30 +217,30 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={handleCopyLink}
-              className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors"
+              className="px-2 sm:px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors"
             >
               {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Share2 className="w-3 h-3 text-zinc-400" />}
-              <span>{copiedLink ? 'Copied!' : 'Invite Peer'}</span>
+              <span className="hidden sm:inline">{copiedLink ? 'Copied!' : 'Invite Peer'}</span>
             </button>
 
             <button
               onClick={() => setExplainOpen(true)}
-              className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all cursor-pointer"
+              className="px-2.5 sm:px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-1 text-[11px] shadow-md shadow-rose-600/30 transition-all cursor-pointer"
             >
               <Bot className="w-3.5 h-3.5" />
-              <span>AI Pair Assist</span>
+              <span>AI Assist</span>
             </button>
           </div>
         </div>
 
         {/* Monaco Editor with peer cursors & debounced linting */}
-        <div className="flex-1 relative min-h-[350px]">
+        <div className="relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden">
           <MonacoEditorView
             code={code}
-            language="typescript"
+            language={language}
             onChange={handleCodeChange}
             onCursorChange={handleCursorChange}
             onSelectLineForExplain={(line, diag) => {
@@ -194,7 +255,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
         </div>
 
         {/* Bottom Diagnostics Strip */}
-        <div className="p-3 border-t border-zinc-800 bg-zinc-950">
+        <div className="p-2 sm:p-3 border-t border-zinc-800 bg-zinc-950 flex-shrink-0 max-h-48 overflow-y-auto">
           <DiagnosticsList
             diagnostics={diagnostics}
             persona={persona}
@@ -209,8 +270,10 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
       </div>
 
       {/* Right Column: Shared Pair Chat & AI Events */}
-      <div className="w-full lg:w-80 border-l border-zinc-800 bg-zinc-950 flex flex-col">
-        <div className="p-3 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs">
+      <div className={`w-full lg:w-80 border-l border-zinc-800 bg-zinc-950 flex-col min-h-0 ${
+        mobileTab === 'chat' ? 'flex flex-1' : 'hidden lg:flex'
+      }`}>
+        <div className="p-3 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs flex-shrink-0">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-indigo-400" />
             <h3 className="font-bold text-white">Live Room Chat</h3>
@@ -221,7 +284,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
         </div>
 
         {/* Chat Feed */}
-        <div className="flex-1 p-3 space-y-3 overflow-y-auto text-xs">
+        <div className="flex-1 min-h-0 p-3 space-y-3 overflow-y-auto text-xs">
           {messages.map((m) => (
             <div
               key={m.id}
@@ -242,7 +305,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
         </div>
 
         {/* Chat input */}
-        <div className="p-3 border-t border-zinc-800 bg-zinc-900/80">
+        <div className="p-3 border-t border-zinc-800 bg-zinc-900/80 flex-shrink-0">
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             <input
               type="text"
@@ -265,7 +328,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
       {/* Floating Explain Drawer */}
       <ExplainPanel
         code={code}
-        language="typescript"
+        language={language}
         selectedLine={selectedLine}
         selectedDiagnostic={selectedDiag}
         persona={persona}

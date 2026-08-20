@@ -44,11 +44,11 @@ async function startServer() {
   app.post('/api/ai/lint', async (req, res) => {
     try {
       const { code, language, persona, engine } = req.body;
-      const diagnostics = await analyzeCodeForLint(code, language || 'typescript', persona || 'standard', engine);
-      res.json({ diagnostics });
+      const diagnostics = await analyzeCodeForLint(code || '', language || 'javascript', persona || 'standard', engine);
+      res.json({ diagnostics: Array.isArray(diagnostics) ? diagnostics : [] });
     } catch (err: any) {
-      console.error('Lint API error:', err);
-      res.status(500).json({ error: err.message || 'Lint failed' });
+      console.warn('Lint API warning:', err?.message || err);
+      res.json({ diagnostics: [] });
     }
   });
 
