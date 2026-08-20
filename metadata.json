@@ -1,0 +1,6 @@
+{
+  "name": "CodeSensei",
+  "description": "Real-time collaborative debugging arena featuring an autonomous AI pair-programmer with Standard & Roast modes, debounced live linting, 1v1 Battle Mode with live commentary, and Monaco Editor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
