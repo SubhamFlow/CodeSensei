@@ -27,8 +27,77 @@ export function getAiConfig() {
   return {
     hasGeminiKey: Boolean(geminiApiKey),
     hasGroqKey: Boolean(groqApiKey),
-    defaultEngine: (groqApiKey ? 'groq-llama3.3' : 'gemini-3.7-flash') as AiEngine,
+    defaultEngine: (geminiApiKey ? 'gemini-3.7-flash' : (groqApiKey ? 'groq-llama3.3' : 'gemini-3.7-flash')) as AiEngine,
   };
+}
+
+const GROQ_CANDIDATE_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'llama3-70b-8192',
+  'llama3-8b-8192',
+];
+
+/**
+ * Execute Groq completion with model fallback chain
+ */
+async function tryGroqCompletion(params: {
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  temperature?: number;
+  response_format?: { type: 'json_object' | 'text' };
+  max_tokens?: number;
+}): Promise<string | null> {
+  if (!groqClient) return null;
+  for (const model of GROQ_CANDIDATE_MODELS) {
+    try {
+      const completion = await groqClient.chat.completions.create({
+        ...params,
+        model,
+      });
+      const content = completion.choices[0]?.message?.content;
+      if (content) return content;
+    } catch (err: any) {
+      if (err?.status === 404 || err?.code === 'model_not_found' || String(err?.message || err).includes('not exist')) {
+        continue;
+      }
+      break;
+    }
+  }
+  return null;
+}
+
+/**
+ * Execute Groq streaming with model fallback chain
+ */
+async function* tryGroqStream(params: {
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  temperature?: number;
+}): AsyncGenerator<string, boolean, unknown> {
+  if (!groqClient) return false;
+  for (const model of GROQ_CANDIDATE_MODELS) {
+    try {
+      const stream = await groqClient.chat.completions.create({
+        ...params,
+        model,
+        stream: true,
+      });
+      let yieldedAny = false;
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content || '';
+        if (delta) {
+          yield delta;
+          yieldedAny = true;
+        }
+      }
+      if (yieldedAny) return true;
+    } catch (err: any) {
+      if (err?.status === 404 || err?.code === 'model_not_found' || String(err?.message || err).includes('not exist')) {
+        continue;
+      }
+      break;
+    }
+  }
+  return false;
 }
 
 const STANDARD_SYSTEM_PROMPT = `You are CodeSensei, an expert Senior Staff Software Engineer and autonomous AI pair programmer.
@@ -119,24 +188,22 @@ If there are no bugs or issues, return an empty array []. Output ONLY valid raw 
   // 1. Try Groq if key exists and requested
   if (preferredEngine === 'groq-llama3.3' && groqClient) {
     try {
-      const completion = await withRetry(() =>
-        groqClient!.chat.completions.create({
-          messages: [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: prompt }
-          ],
-          model: 'llama-3.3-70b-versatile',
-          temperature: persona === 'roast' ? 0.7 : 0.2,
-          response_format: { type: 'json_object' }
-        })
-      );
+      const raw = await tryGroqCompletion({
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: prompt }
+        ],
+        temperature: persona === 'roast' ? 0.7 : 0.2,
+        response_format: { type: 'json_object' }
+      });
 
-      const raw = completion.choices[0]?.message?.content || '[]';
-      const parsed = JSON.parse(raw);
-      const diagnostics: CodeDiagnostic[] = Array.isArray(parsed) ? parsed : (parsed.diagnostics || parsed.issues || []);
-      return normalizeDiagnostics(diagnostics, code);
-    } catch (err) {
-      console.warn('[AI Service] Groq linting unavailable, failing over to Gemini.');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const diagnostics: CodeDiagnostic[] = Array.isArray(parsed) ? parsed : (parsed.diagnostics || parsed.issues || []);
+        return normalizeDiagnostics(diagnostics, code);
+      }
+    } catch {
+      // Gracefully fall through to Gemini
     }
   }
 
@@ -347,26 +414,25 @@ Provide a direct, high-impact breakdown:
 2. Why it breaks in runtime / edge cases
 3. Clean Fixed Code Snippet`;
 
-  // 1. Try Groq streaming
+  // 1. Try Groq streaming if preferred
   if (preferredEngine === 'groq-llama3.3' && groqClient) {
     try {
-      const stream = await groqClient.chat.completions.create({
+      const groqGen = tryGroqStream({
         messages: [
           { role: 'system', content: systemInstruction },
           { role: 'user', content: userPrompt }
         ],
-        model: 'llama-3.3-70b-versatile',
-        temperature: persona === 'roast' ? 0.75 : 0.3,
-        stream: true
+        temperature: persona === 'roast' ? 0.75 : 0.3
       });
 
-      for await (const chunk of stream) {
-        const text = chunk.choices[0]?.delta?.content || '';
-        if (text) yield text;
+      let streamed = false;
+      for await (const chunk of groqGen) {
+        yield chunk;
+        streamed = true;
       }
-      return;
-    } catch (err) {
-      console.warn('[AI Service] Groq stream explain fallback to Gemini:', err);
+      if (streamed) return;
+    } catch {
+      // Seamlessly fall through to Gemini
     }
   }
 
@@ -488,14 +554,13 @@ Output ONLY the commentary sentence.`;
 
   if (preferredEngine === 'groq-llama3.3' && groqClient) {
     try {
-      const completion = await groqClient.chat.completions.create({
+      const res = await tryGroqCompletion({
         messages: [{ role: 'user', content: prompt }],
-        model: 'llama-3.3-70b-versatile',
         temperature: 0.8,
         max_tokens: 120
       });
-      commentaryText = completion.choices[0]?.message?.content?.trim() || '';
-    } catch (e) {
+      commentaryText = res?.trim() || '';
+    } catch {
       // fallback
     }
   }
@@ -594,17 +659,18 @@ Return JSON with this exact schema:
 
   if (groqClient) {
     try {
-      const completion = await groqClient.chat.completions.create({
+      const raw = await tryGroqCompletion({
         messages: [{ role: 'user', content: prompt }],
-        model: 'llama-3.3-70b-versatile',
         temperature: 0.1,
         response_format: { type: 'json_object' }
       });
-      const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
-      if (parsed.tests && typeof parsed.passedCount === 'number') {
-        return parsed;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.tests && typeof parsed.passedCount === 'number') {
+          return parsed;
+        }
       }
-    } catch (e) {
+    } catch {
       // fallback to Gemini
     }
   }

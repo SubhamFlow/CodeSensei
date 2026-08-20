@@ -21,7 +21,7 @@ export default function App() {
   });
 
   const [aiEngine, setAiEngine] = useState<AiEngine>(() => {
-    return (localStorage.getItem('codesensei_engine') as AiEngine) || 'groq-llama3.3';
+    return (localStorage.getItem('codesensei_engine') as AiEngine) || 'gemini-3.7-flash';
   });
 
   const [soundEnabled, setSoundEnabled] = useState(() => sound.isEnabled());

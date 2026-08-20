@@ -15,7 +15,7 @@ export class BattleEngine {
     this.io = io;
   }
 
-  public getOrCreateRoom(roomId: string, challengeId?: string, persona: PersonaMode = 'standard', engine: AiEngine = 'groq-llama3.3'): BattleRoomState {
+  public getOrCreateRoom(roomId: string, challengeId?: string, persona: PersonaMode = 'standard', engine: AiEngine = 'gemini-3.7-flash'): BattleRoomState {
     if (this.rooms.has(roomId)) {
       return this.rooms.get(roomId)!;
     }
@@ -55,7 +55,7 @@ export class BattleEngine {
   public handleConnection(socket: Socket) {
     // Join or create battle room
     socket.on('battle:join', ({ roomId, username, avatar, persona, aiEngine, vsAi, challengeId }) => {
-      const room = this.getOrCreateRoom(roomId, challengeId, persona || 'standard', aiEngine || 'groq-llama3.3');
+      const room = this.getOrCreateRoom(roomId, challengeId, persona || 'standard', aiEngine || 'gemini-3.7-flash');
       socket.join(roomId);
 
       const playerId = socket.id;
