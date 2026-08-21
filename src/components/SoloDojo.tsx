@@ -200,7 +200,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
   const totalCount = testResults.length;
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
+    <div className="flex-1 flex flex-col lg:flex-row h-full min-h-0 bg-zinc-950 overflow-hidden">
       {/* Mobile Mode Switcher Bar (Only visible on < lg screens) */}
       <div className="lg:hidden flex items-center justify-between px-2.5 py-1.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 text-xs">
         <div className="flex items-center gap-1">
@@ -254,7 +254,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
       </div>
 
       {/* Left Column: Challenge Selector & Problem Spec (Desktop always, Mobile conditional) */}
-      <div className={`w-full lg:w-80 border-r border-zinc-800 bg-zinc-950 flex-col h-[480px] sm:h-[540px] md:h-[580px] lg:h-full ${mobileView === 'problem' ? 'flex' : 'hidden lg:flex'}`}>
+      <div className={`w-full lg:w-80 border-r border-zinc-800 bg-zinc-950 flex-col h-full min-h-0 ${mobileView === 'problem' ? 'flex flex-1' : 'hidden lg:flex'}`}>
         <div className="h-11 px-3 border-b border-zinc-800 bg-zinc-900/90 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-indigo-400" />
@@ -340,7 +340,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
       </div>
 
       {/* Center & Right: Monaco Editor & Controls & Diagnostics */}
-      <div className={`flex-1 flex flex-col bg-zinc-950 min-w-0 min-h-0 lg:h-full ${mobileView === 'problem' ? 'hidden lg:flex' : 'flex'}`}>
+      <div className={`flex-1 flex flex-col bg-zinc-950 min-w-0 min-h-0 h-full overflow-hidden ${mobileView === 'problem' ? 'hidden lg:flex' : 'flex'}`}>
         {/* Editor action header */}
         <div className="h-11 px-3 sm:px-4 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between gap-2 text-xs flex-shrink-0">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -396,7 +396,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
         </div>
 
         {/* Monaco Editor (Visible when in editor view or on desktop) */}
-        <div className={`relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden ${mobileView === 'results' ? 'hidden lg:flex' : 'flex'}`}>
+        <div className={`flex-1 min-h-0 relative flex flex-col overflow-hidden ${mobileView === 'results' ? 'hidden lg:flex' : 'flex'}`}>
           <MonacoEditorView
             code={code}
             language={selectedLanguage}
@@ -415,7 +415,7 @@ export const SoloDojo: React.FC<SoloDojoProps> = ({
         <div className={`border-t border-zinc-800 bg-zinc-950 flex flex-col flex-shrink-0 ${
           mobileView === 'results'
             ? 'flex-1 min-h-0'
-            : 'h-40 lg:h-44 hidden lg:flex'
+            : 'h-44 sm:h-48 lg:h-52 hidden lg:flex'
         }`}>
           <div className="flex items-center justify-between px-3 bg-zinc-900 border-b border-zinc-800 text-xs flex-shrink-0">
             <div className="flex items-center gap-1">

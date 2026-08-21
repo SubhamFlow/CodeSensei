@@ -98,10 +98,12 @@ async function startServer() {
   // In-memory state for Collaborative Pair Rooms
   const pairRooms = new Map<string, {
     roomId: string;
+    challengeId?: string;
     code: string;
     language: string;
     persona: 'standard' | 'roast';
     engine: string;
+    testResults?: any[];
     peers: Record<string, { id: string; name: string; color: string; cursor?: { line: number; column: number } }>;
     messages: Array<{ id: string; sender: string; text: string; timestamp: number; isAi?: boolean }>;
   }>();
@@ -113,22 +115,28 @@ async function startServer() {
     battleEngine.handleConnection(socket);
 
     // Collaborative Pair Programming handlers
-    socket.on('pair:join', ({ roomId, username, userColor }) => {
+    socket.on('pair:join', ({ roomId, username, userColor, challengeId }) => {
       socket.join(`pair:${roomId}`);
       let room = pairRooms.get(roomId);
       if (!room) {
+        const defaultChallenge = challengeId ? CHALLENGES.find(c => c.id === challengeId) : CHALLENGES[0];
+        const defaultCode = defaultChallenge 
+          ? (defaultChallenge.starterCodes?.javascript || defaultChallenge.brokenCode)
+          : `// CodeSensei Collaborative Pair-Programming Sandbox\n// Edit together with live AI pair-programming linting & roasts!\n\nfunction calculateMetrics(records) {\n  let total = 0;\n  for (var i = 0; i < records.length; i++) {\n    // Type your algorithm or debug together here...\n    total += records[i].value;\n  }\n  return total;\n}\n`;
+
         room = {
           roomId,
-          code: `// CodeSensei Collaborative Pair-Programming Sandbox\n// Edit together with live AI pair-programming linting & roasts!\n\nfunction calculateMetrics(records) {\n  let total = 0;\n  for (var i = 0; i < records.length; i++) {\n    // Type your algorithm or debug together here...\n    total += records[i].value;\n  }\n  return total;\n}\n`,
-          language: 'typescript',
+          challengeId: defaultChallenge?.id || 'number-of-islands',
+          code: defaultCode,
+          language: 'javascript',
           persona: 'standard',
-          engine: 'groq-llama3.3',
+          engine: 'gemini-3.7-flash',
           peers: {},
           messages: [
             {
               id: `msg-init-${Date.now()}`,
               sender: 'CodeSensei AI',
-              text: 'Connected to collaborative pair room! Start coding together and I will analyze bugs in real time.',
+              text: 'Connected to collaborative pair room! Start coding together, run test cases, and I will analyze bugs in real time.',
               timestamp: Date.now(),
               isAi: true
             }
@@ -144,25 +152,38 @@ async function startServer() {
       };
 
       // Send initial room state to joining peer
-      socket.emit('pair:init', room);
-      // Broadcast updated peer list
+      socket.emit('pair:init', {
+        roomId: room.roomId,
+        challengeId: room.challengeId,
+        code: room.code,
+        language: room.language,
+        persona: room.persona,
+        peers: room.peers,
+        messages: room.messages,
+        testResults: room.testResults
+      });
+
+      // Broadcast updated peer list to all peers in room
       io.to(`pair:${roomId}`).emit('pair:peers', Object.values(room.peers));
     });
 
-    socket.on('pair:edit', ({ roomId, code, cursor }) => {
+    // Handle Code Edit: strictly updates code and synchronizes
+    socket.on('pair:edit', ({ roomId, code, language }) => {
       const room = pairRooms.get(roomId);
       if (!room) return;
 
-      room.code = code;
-      if (cursor && room.peers[socket.id]) {
-        room.peers[socket.id].cursor = cursor;
+      if (typeof code === 'string') {
+        room.code = code;
+      }
+      if (language) {
+        room.language = language;
       }
 
-      // Broadcast changes to peers in room
+      // Broadcast changes to OTHER peers in room (do not echo to sender)
       socket.to(`pair:${roomId}`).emit('pair:sync', {
-        code,
-        senderId: socket.id,
-        cursor
+        code: room.code,
+        language: room.language,
+        senderId: socket.id
       });
 
       // Debounced AI Lint Watcher for pair room
@@ -174,7 +195,7 @@ async function startServer() {
       const timer = setTimeout(async () => {
         try {
           const diagnostics = await analyzeCodeForLint(
-            code,
+            room.code,
             room.language,
             room.persona,
             room.engine as any
@@ -186,9 +207,28 @@ async function startServer() {
         } catch (err) {
           console.error('Pair room lint error:', err);
         }
-      }, 1500);
+      }, 1200);
 
       pairDebounceTimers.set(debounceKey, timer);
+    });
+
+    // Handle Cursor Movement: strictly updates cursor coordinates, never touches code
+    socket.on('pair:cursor', ({ roomId, cursor }) => {
+      const room = pairRooms.get(roomId);
+      if (!room) return;
+
+      if (cursor && room.peers[socket.id]) {
+        room.peers[socket.id].cursor = cursor;
+        socket.to(`pair:${roomId}`).emit('pair:peers', Object.values(room.peers));
+      }
+    });
+
+    // Handle Language change across room
+    socket.on('pair:set_language', ({ roomId, language }) => {
+      const room = pairRooms.get(roomId);
+      if (!room) return;
+      room.language = language;
+      io.to(`pair:${roomId}`).emit('pair:language_sync', language);
     });
 
     socket.on('pair:chat_message', ({ roomId, text, senderName }) => {

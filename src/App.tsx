@@ -75,7 +75,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white">
+    <div className="h-screen h-[100dvh] bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-rose-500 selection:text-white overflow-hidden">
       {/* Top Navigation & Settings Bar */}
       <Header
         currentTab={currentTab}
@@ -90,8 +90,8 @@ export default function App() {
         onOpenHelp={() => setHelpOpen(true)}
       />
 
-      {/* Main Mode View - scrollable on mobile/tablet, full-height on desktop */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-y-auto lg:overflow-hidden">
+      {/* Main Mode View - locked viewport height, no screen-wide overflow */}
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
         {currentTab === 'battle' && (
           <BattleArena persona={persona} aiEngine={aiEngine} />
         )}

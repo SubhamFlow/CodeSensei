@@ -63,21 +63,39 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     });
 
     const handleInit = (room: any) => {
-      setCode(room.code);
-      setPeers(Object.values(room.peers));
-      setMessages(room.messages || []);
+      if (typeof room.code === 'string') {
+        setCode(room.code);
+      }
+      if (room.language) {
+        setLanguage(room.language);
+      }
+      if (room.peers) {
+        setPeers(Object.values(room.peers));
+      }
+      if (room.messages) {
+        setMessages(room.messages);
+      }
     };
 
-    const handleSync = (data: { code: string; senderId: string; cursor?: any }) => {
-      setCode(data.code);
+    const handleSync = (data: { code: string; language?: SupportedLanguage; senderId: string }) => {
+      if (typeof data.code === 'string') {
+        setCode(data.code);
+      }
+      if (data.language) {
+        setLanguage(data.language);
+      }
     };
 
     const handlePeers = (updatedPeers: any[]) => {
-      setPeers(updatedPeers);
+      setPeers(Array.isArray(updatedPeers) ? updatedPeers : []);
+    };
+
+    const handleLanguageSync = (newLang: SupportedLanguage) => {
+      setLanguage(newLang);
     };
 
     const handleDecorations = (data: { diagnostics: CodeDiagnostic[]; persona: PersonaMode }) => {
-      setDiagnostics(data.diagnostics);
+      setDiagnostics(data.diagnostics || []);
     };
 
     const handleNewMessage = (msg: any) => {
@@ -88,6 +106,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     socket.on('pair:init', handleInit);
     socket.on('pair:sync', handleSync);
     socket.on('pair:peers', handlePeers);
+    socket.on('pair:language_sync', handleLanguageSync);
     socket.on('decorations:update', handleDecorations);
     socket.on('pair:new_message', handleNewMessage);
 
@@ -95,11 +114,13 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
       socket.off('pair:init', handleInit);
       socket.off('pair:sync', handleSync);
       socket.off('pair:peers', handlePeers);
+      socket.off('pair:language_sync', handleLanguageSync);
       socket.off('decorations:update', handleDecorations);
       socket.off('pair:new_message', handleNewMessage);
     };
   }, [roomId]);
 
+  // Code editor handler (only emitted when code content is edited)
   const handleCodeChange = (newCode: string) => {
     setCode(newCode);
     socket.emit('pair:edit', {
@@ -109,12 +130,19 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     });
   };
 
+  // Cursor movement handler (never emits or overwrites code)
   const handleCursorChange = (cursor: { line: number; column: number }) => {
-    socket.emit('pair:edit', {
+    socket.emit('pair:cursor', {
       roomId,
-      code,
-      cursor,
-      language
+      cursor
+    });
+  };
+
+  const handleLanguageChange = (newLang: SupportedLanguage) => {
+    setLanguage(newLang);
+    socket.emit('pair:set_language', {
+      roomId,
+      language: newLang
     });
   };
 
@@ -137,8 +165,18 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  const handleCreateNewRoom = () => {
+    const newRoomId = `pair-${Math.random().toString(36).substring(2, 8)}`;
+    setRoomId(newRoomId);
+    const newUrl = `${window.location.origin}?pair=${newRoomId}`;
+    window.history.pushState({}, '', newUrl);
+    navigator.clipboard.writeText(newUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
   return (
-    <div className="flex-1 flex flex-col lg:flex-row min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
+    <div className="flex-1 flex flex-col lg:flex-row h-full min-h-0 bg-zinc-950 overflow-hidden">
       {/* Mobile Sub-Navigation Bar (< lg screens) */}
       <div className="lg:hidden flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 flex-shrink-0 text-xs">
         <div className="flex items-center gap-1.5">
@@ -171,7 +209,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
       </div>
 
       {/* Main Coding Area */}
-      <div className={`flex-1 flex-col min-w-0 border-r border-zinc-800 bg-zinc-950 min-h-0 ${
+      <div className={`flex-1 flex-col min-w-0 border-r border-zinc-800 bg-zinc-950 h-full min-h-0 overflow-hidden ${
         mobileTab === 'code' ? 'flex' : 'hidden lg:flex'
       }`}>
         {/* Pair room header */}
@@ -191,7 +229,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
               {LANGUAGES.map((lang) => (
                 <button
                   key={lang.id}
-                  onClick={() => setLanguage(lang.id)}
+                  onClick={() => handleLanguageChange(lang.id)}
                   className={`px-1.5 sm:px-2 py-0.5 text-[10px] font-mono rounded font-semibold transition-all ${
                     language === lang.id
                       ? 'bg-indigo-600 text-white shadow-sm'
@@ -219,11 +257,20 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
 
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
-              onClick={handleCopyLink}
-              className="px-2 sm:px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors"
+              onClick={handleCreateNewRoom}
+              title="Create a new private pair-programming room"
+              className="px-2 sm:px-2.5 py-1 bg-zinc-800/90 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors cursor-pointer"
             >
-              {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Share2 className="w-3 h-3 text-zinc-400" />}
-              <span className="hidden sm:inline">{copiedLink ? 'Copied!' : 'Invite Peer'}</span>
+              <Zap className="w-3 h-3 text-amber-400" />
+              <span className="hidden md:inline">New Room</span>
+            </button>
+
+            <button
+              onClick={handleCopyLink}
+              className="px-2 sm:px-2.5 py-1 bg-indigo-600/90 hover:bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-1 text-[11px] transition-colors cursor-pointer shadow-xs"
+            >
+              {copiedLink ? <Check className="w-3 h-3 text-emerald-300" /> : <Share2 className="w-3 h-3 text-white" />}
+              <span>{copiedLink ? 'Link Copied!' : 'Invite Peer'}</span>
             </button>
 
             <button
@@ -237,7 +284,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
         </div>
 
         {/* Monaco Editor with peer cursors & debounced linting */}
-        <div className="relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 relative flex flex-col overflow-hidden">
           <MonacoEditorView
             code={code}
             language={language}
@@ -255,7 +302,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
         </div>
 
         {/* Bottom Diagnostics Strip */}
-        <div className="p-2 sm:p-3 border-t border-zinc-800 bg-zinc-950 flex-shrink-0 max-h-48 overflow-y-auto">
+        <div className="h-44 lg:h-48 p-2 sm:p-3 border-t border-zinc-800 bg-zinc-950 flex-shrink-0 overflow-y-auto">
           <DiagnosticsList
             diagnostics={diagnostics}
             persona={persona}
@@ -270,7 +317,7 @@ export const CollaborativePairRoom: React.FC<CollaborativePairRoomProps> = ({
       </div>
 
       {/* Right Column: Shared Pair Chat & AI Events */}
-      <div className={`w-full lg:w-80 border-l border-zinc-800 bg-zinc-950 flex-col min-h-0 ${
+      <div className={`w-full lg:w-80 border-l border-zinc-800 bg-zinc-950 flex-col h-full min-h-0 ${
         mobileTab === 'chat' ? 'flex flex-1' : 'hidden lg:flex'
       }`}>
         <div className="p-3 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs flex-shrink-0">

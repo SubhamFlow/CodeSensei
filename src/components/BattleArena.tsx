@@ -227,7 +227,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-[calc(100vh-62px)] lg:h-[calc(100vh-62px)] bg-zinc-950 overflow-y-auto lg:overflow-hidden">
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-zinc-950 overflow-hidden">
       {/* Match Banner & Progress Bar */}
       <div className="px-3 sm:px-4 py-2 bg-zinc-900/90 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 text-xs flex-shrink-0">
         {/* Left: Challenge info */}
@@ -394,7 +394,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({
           </div>
 
           {/* Player Monaco Editor */}
-          <div className="relative h-[480px] sm:h-[540px] md:h-[580px] lg:h-auto lg:flex-1 lg:min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 relative flex flex-col overflow-hidden">
             <MonacoEditorView
               code={myCode || (roomState?.challenge.starterCodes?.[currentRoomLanguage] || roomState?.challenge.brokenCode || '')}
               language={currentRoomLanguage}
